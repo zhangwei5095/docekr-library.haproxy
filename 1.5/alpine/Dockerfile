@@ -1,19 +1,25 @@
-FROM debian:jessie
-
-RUN apt-get update && apt-get install -y libssl1.0.0 libpcre3 --no-install-recommends && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.4
 
 ENV HAPROXY_MAJOR 1.5
 ENV HAPROXY_VERSION 1.5.18
 ENV HAPROXY_MD5 21d35f114583ef731bc96af05b46c75a
 
 # see http://sources.debian.net/src/haproxy/1.5.8-1/debian/rules/ for some helpful navigation of the possible "make" arguments
-RUN buildDeps='curl gcc libc6-dev libpcre3-dev libssl-dev make' \
-	&& set -x \
-	&& apt-get update && apt-get install -y $buildDeps --no-install-recommends && rm -rf /var/lib/apt/lists/* \
+RUN set -x \
+	&& apk add --no-cache --virtual .build-deps \
+		curl \
+		gcc \
+		libc-dev \
+		linux-headers \
+		make \
+		openssl-dev \
+		pcre-dev \
+		zlib-dev \
 	&& curl -SL "http://www.haproxy.org/download/${HAPROXY_MAJOR}/src/haproxy-${HAPROXY_VERSION}.tar.gz" -o haproxy.tar.gz \
 	&& echo "${HAPROXY_MD5}  haproxy.tar.gz" | md5sum -c \
-	&& mkdir -p /usr/src/haproxy \
-	&& tar -xzf haproxy.tar.gz -C /usr/src/haproxy --strip-components=1 \
+	&& mkdir -p /usr/src \
+	&& tar -xzf haproxy.tar.gz -C /usr/src \
+	&& mv "/usr/src/haproxy-$HAPROXY_VERSION" /usr/src/haproxy \
 	&& rm haproxy.tar.gz \
 	&& make -C /usr/src/haproxy \
 		TARGET=linux2628 \
@@ -25,7 +31,15 @@ RUN buildDeps='curl gcc libc6-dev libpcre3-dev libssl-dev make' \
 	&& mkdir -p /usr/local/etc/haproxy \
 	&& cp -R /usr/src/haproxy/examples/errorfiles /usr/local/etc/haproxy/errors \
 	&& rm -rf /usr/src/haproxy \
-	&& apt-get purge -y --auto-remove $buildDeps
+	&& runDeps="$( \
+		scanelf --needed --nobanner --recursive /usr/local \
+			| awk '{ gsub(/,/, "\nso:", $2); print "so:" $2 }' \
+			| sort -u \
+			| xargs -r apk info --installed \
+			| sort -u \
+	)" \
+	&& apk add --virtual .haproxy-rundeps $runDeps \
+	&& apk del .build-deps
 
 COPY docker-entrypoint.sh /
 ENTRYPOINT ["/docker-entrypoint.sh"]
